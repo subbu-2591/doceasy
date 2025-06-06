@@ -287,3 +287,4 @@ if __name__ == '__main__':
     sys.argv.append('--without-threads')
 
     app.run(host=host, port=port, debug=debug, load_dotenv=False)
+    CORS(app, origins=["https://doceasy-frontend.onrender.com"]) 
