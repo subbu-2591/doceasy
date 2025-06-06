@@ -1,6 +1,8 @@
 import os
+import sys
 from flask import Flask, jsonify, request, current_app
 from flask_cors import CORS
+from cors_config import add_cors_headers, handle_options_request
 from flask_mail import Mail
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
@@ -73,13 +75,25 @@ def create_app():
         raise
     
     # CORS configuration - allow all common development ports for all routes
-    cors_origins = os.getenv('CORS_ORIGIN', 'http://localhost:5173,http://localhost:8080,http://localhost:3000').split(',')
+    cors_origins = os.getenv('CORS_ORIGIN', 'http://localhost:5173,http://localhost:8080,http://localhost:3000,https://doc-easy.onrender.com').split(',')
     CORS(app, 
          origins=cors_origins,
          allow_headers=["Content-Type", "Authorization"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          supports_credentials=True
     )
+    
+    # Add CORS headers to all responses
+    @app.after_request
+    def after_request(response):
+        return add_cors_headers(response)
+    
+    # Handle OPTIONS requests
+    @app.before_request
+    def before_request():
+        response = handle_options_request()
+        if response:
+            return response
     
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -128,6 +142,19 @@ def create_app():
                 'database': 'disconnected',
                 'error': str(e)
             }), 503
+    
+    # Add CORS headers to auth ping endpoint
+    @app.route('/api/auth/ping', methods=['GET', 'OPTIONS'])
+    def auth_ping():
+        if request.method == 'OPTIONS':
+            # Handle preflight request
+            response = jsonify({'status': 'ok'})
+            response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+            return response
+            
+        return jsonify({'status': 'ok', 'message': 'Auth service is running'}), 200
     
     @app.route('/get_agora_token', methods=['POST'])
     def get_agora_token():
@@ -287,4 +314,3 @@ if __name__ == '__main__':
     sys.argv.append('--without-threads')
 
     app.run(host=host, port=port, debug=debug, load_dotenv=False)
-    CORS(app, origins=["https://doceasy-frontend.onrender.com"]) 

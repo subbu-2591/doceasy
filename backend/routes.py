@@ -116,14 +116,32 @@ def doctor_required(f):
     return decorated
 
 # Authentication Routes
-@auth_bp.route('/ping', methods=['GET'])
+@auth_bp.route('/ping', methods=['GET', 'OPTIONS'])
 def ping():
     """Health check endpoint for auth routes"""
-    return jsonify({'status': 'ok', 'message': 'Auth service is running'}), 200
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        return response
+        
+    response = jsonify({'status': 'ok', 'message': 'Auth service is running'})
+    response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+    return response, 200
 
-@auth_bp.route('/register', methods=['POST'])
+@auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 def register():
     """Register a new patient"""
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+        return response
+        
     try:
         data = request.get_json()
         logger.info(f"Registration request received for email: {data.get('email')}")
