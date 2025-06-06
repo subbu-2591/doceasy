@@ -1,11 +1,12 @@
-from pymongo import MongoClient
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
 import os
 
-# Get MongoDB URI from environment variable or use default
-MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/doceasy')
+# MongoDB Atlas connection string
+uri = "mongodb+srv://subrahmanyag79:dhDShm338VxoPMUz@doceasy.kp4oh2g.mongodb.net/?retryWrites=true&w=majority&appName=doceasy"
 
-# Create MongoDB client
-client = MongoClient(MONGODB_URI)
+# Create a new client and connect to the server
+client = MongoClient(uri, server_api=ServerApi('1'))
 
 # Get database instance
 db = client.get_database() 

@@ -2,7 +2,8 @@ import os
 from flask import Flask, jsonify, request, current_app
 from flask_cors import CORS
 from flask_mail import Mail
-from pymongo import MongoClient
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
 from datetime import timedelta
 import logging
@@ -53,19 +54,20 @@ def create_app():
     # Initialize Flask-Mail
     mail = Mail(app)
     
-    # MongoDB configuration
-    mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+    # MongoDB Atlas configuration
+    uri = "mongodb+srv://subrahmanyag79:dhDShm338VxoPMUz@doceasy.kp4oh2g.mongodb.net/?retryWrites=true&w=majority&appName=doceasy"
     mongodb_db_name = os.getenv('MONGODB_DB_NAME', 'doceasy')
     
-    # Connect to MongoDB
+    # Connect to MongoDB Atlas
     try:
-        client = MongoClient(mongodb_uri)
+        # Create a new client and connect to the server
+        client = MongoClient(uri, server_api=ServerApi('1'))
         db = client[mongodb_db_name]
         app.config['DATABASE'] = db
         
         # Test connection
-        client.server_info()
-        logger.info(f"Connected to MongoDB database: {mongodb_db_name}")
+        client.admin.command('ping')
+        logger.info(f"Connected to MongoDB Atlas database: {mongodb_db_name}")
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
