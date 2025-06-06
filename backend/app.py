@@ -257,6 +257,22 @@ def create_app():
             logger.error(f"Error fetching consultation: {str(e)}")
             return jsonify({'error': str(e)}), 500
     
+    # Add redirect for /api/register to /api/auth/register
+    @app.route('/api/register', methods=['GET', 'POST', 'OPTIONS'])
+    def redirect_register():
+        if request.method == 'OPTIONS':
+            # Handle preflight request
+            response = jsonify({'status': 'ok'})
+            response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+            return response
+            
+        return jsonify({
+            'message': 'Redirected endpoint. Please use /api/auth/register instead',
+            'correct_endpoint': '/api/auth/register'
+        }), 308
+    
     return app
 
 def create_default_admin(db):
@@ -299,13 +315,182 @@ def get_db():
 
 app = create_app()
 
+# Root path handler
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        'status': 'online',
+        'message': 'DocEasy API is running',
+        'endpoints': {
+            'health': '/health',
+            'auth': '/api/auth/*',
+            'api': '/api/*'
+        }
+    }), 200
+
+# Health check endpoint with explicit CORS headers
+@app.route('/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        return response
+        
+    try:
+        # Check database connection
+        app.config['DATABASE'].list_collection_names()
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'jwt_expiry_hours': int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 168))
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e)
+        }), 503
+
+# Add CORS headers to auth ping endpoint
+@app.route('/api/auth/ping', methods=['GET', 'OPTIONS'])
+def auth_ping():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        return response
+        
+    return jsonify({'status': 'ok', 'message': 'Auth service is running'}), 200
+
+@app.route('/get_agora_token', methods=['POST'])
+def get_agora_token():
+    try:
+        data = request.get_json()
+        channel_name = data.get('channel')
+        uid = data.get('uid', 0)
+        role = data.get('role', 'publisher')  # publisher or subscriber
+        
+        if not channel_name:
+            return jsonify({'error': 'Channel name is required'}), 400
+
+        # Set token expiration time (24 hours)
+        expiration_time_in_seconds = 24 * 3600
+        current_timestamp = int(time.time())
+        privilegeExpiredTs = current_timestamp + expiration_time_in_seconds
+
+        # Generate token
+        token = RtcTokenBuilder.buildTokenWithUid(
+            AGORA_APP_ID,
+            AGORA_APP_CERTIFICATE,
+            channel_name,
+            uid,
+            1 if role == 'publisher' else 2,  # 1 for publisher, 2 for subscriber
+            privilegeExpiredTs
+        )
+
+        return jsonify({
+            'token': token,
+            'appId': AGORA_APP_ID,
+            'channel': channel_name,
+            'uid': uid,
+            'role': role,
+            'expires_in': expiration_time_in_seconds
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating Agora token: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/consultations/<consultation_id>', methods=['GET'])
+@token_required
+def get_consultation(current_user, consultation_id):
+    try:
+        db = get_db()
+        
+        # Find consultation
+        consultation = db.consultations.find_one({'_id': ObjectId(consultation_id)})
+        
+        if not consultation:
+            return jsonify({'error': 'Consultation not found'}), 404
+
+        # Check if user has access to this consultation
+        if current_user['role'] == 'doctor' and str(consultation['doctor_id']) != current_user['id']:
+            return jsonify({'error': 'Unauthorized access'}), 403
+        elif current_user['role'] == 'patient' and str(consultation['patient_id']) != current_user['id']:
+            return jsonify({'error': 'Unauthorized access'}), 403
+
+        # Generate Agora channel name and token
+        channel_name = f"consultation_{consultation_id}"
+        uid = int(current_user['id'][-6:]) if len(current_user['id']) >= 6 else int(time.time()) % 1000000
+        
+        # Set token expiration time (24 hours)
+        expiration_time_in_seconds = 24 * 3600
+        current_timestamp = int(time.time())
+        privilegeExpiredTs = current_timestamp + expiration_time_in_seconds
+
+        # Generate token
+        token = RtcTokenBuilder.buildTokenWithUid(
+            AGORA_APP_ID,
+            AGORA_APP_CERTIFICATE,
+            channel_name,
+            uid,
+            1,  # Role: publisher
+            privilegeExpiredTs
+        )
+
+        # Convert ObjectId to string for JSON serialization
+        consultation['_id'] = str(consultation['_id'])
+        consultation['doctor_id'] = str(consultation['doctor_id'])
+        consultation['patient_id'] = str(consultation['patient_id'])
+        if 'appointment_id' in consultation:
+            consultation['appointment_id'] = str(consultation['appointment_id'])
+
+        # Add Agora information
+        consultation['agora'] = {
+            'appId': AGORA_APP_ID,
+            'channel': channel_name,
+            'token': token,
+            'uid': uid,
+            'role': current_user['role'],
+            'expires_in': expiration_time_in_seconds
+        }
+
+        return jsonify({
+            'consultation': consultation
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching consultation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Add redirect for /api/register to /api/auth/register
+@app.route('/api/register', methods=['GET', 'POST', 'OPTIONS'])
+def redirect_register():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', 'https://doc-easy.onrender.com')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        return response
+        
+    return jsonify({
+        'message': 'Redirected endpoint. Please use /api/auth/register instead',
+        'correct_endpoint': '/api/auth/register'
+    }), 308
+
 # Optional: Setup logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 if __name__ == '__main__':
     host = os.getenv('HOST', '0.0.0.0')
-    port = int(os.getenv('PORT', 5000))
+    port = int(os.getenv('PORT', 10000))  # Updated to match Render's detected port
     debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
 
     logger.info(f"Starting Flask application on {host}:{port}")
