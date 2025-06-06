@@ -270,18 +270,21 @@ def token_required(f):
 def get_db():
     return current_app.config['DATABASE']
 
+app = create_app()
+
+# Optional: Setup logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 if __name__ == '__main__':
-    app = create_app()
-    
-    # Run the application
     host = os.getenv('HOST', '0.0.0.0')
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
-    
+
     logger.info(f"Starting Flask application on {host}:{port}")
-    
+
     # Disable automatic .env loading to avoid encoding issues
-    import sys
-    sys.argv.append('--without-threads')  # Add any dummy argument to prevent CLI from loading .env
-    
-    app.run(host=host, port=port, debug=debug, load_dotenv=False) 
+    sys.argv.append('--without-threads')
+
+    app.run(host=host, port=port, debug=debug, load_dotenv=False)
+    CORS(app, origins=["https://doceasy-frontend.onrender.com"]) 
